@@ -98,6 +98,26 @@ Pass `--include-transferred` to include them.
 Gifts scanned with `--peer` are for analysis/export only. Telegram will not let
 the current account sell or transfer gifts owned by a different account.
 
+### Research Portals floors
+
+```bash
+# Fetch collection-level Portals floors
+gifts-sales markets portals floors --save
+
+# Fetch model/backdrop/symbol floors for one collection
+gifts-sales markets portals filter-floors --gift-name "Toy Bear" --save
+
+# Sync attribute floors for local gifts from a scanned profile
+gifts-sales markets portals sync-floors --from-local --owner-peer @some_profile --limit 5
+
+# Rank local gifts by the best saved Portals attribute-floor signal
+gifts-sales markets portals portfolio-report --owner-peer @some_profile --limit 25
+```
+
+Portals floor signals are research data, not automatic listing prices. The
+attribute report uses the highest matching model/backdrop/symbol floor saved in
+the local database, so every candidate still needs manual review before sale.
+
 ### Show details for a specific gift
 
 ```bash
@@ -256,7 +276,7 @@ All match criteria are AND-combined. The first matching rule per gift wins.
 | `MAX_PRICE_TON` | — | Optional hard cap for listing prices |
 | `PORTALS_RECIPIENT` | — | Default recipient for `gifts send-to-portals` |
 | `PORTALS_AUTH_DATA` | — | Telegram Mini App auth header value for Portals read-only API |
-| `PORTALS_API_BASE` | `https://portals-market.com/api` | Portals private API base URL |
+| `PORTALS_API_BASE` | `https://portal-market.com/api` | Portals private API base URL |
 | `BOT_TOKEN` | — | Optional Telegram Bot API token for approval notifications |
 | `APPROVAL_CHAT_ID` | — | Optional chat ID for approval notifications |
 | `TON_TO_STARS_RATE` | — | Explicit TON→Stars rate for real listing |

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     max_bulk_jobs: int = 50
     max_price_ton: float | None = None
     portals_recipient: str | None = None
-    portals_api_base: str = "https://portals-market.com/api"
+    portals_api_base: str = "https://portal-market.com/api"
     portals_auth_data: str | None = None
     bot_token: str | None = None
     approval_chat_id: str | None = None

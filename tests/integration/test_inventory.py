@@ -102,6 +102,33 @@ async def test_scan_visible_peer_uses_owner_namespace(db_session, db_session_fac
 
 
 @pytest.mark.asyncio
+async def test_scan_visible_peer_without_saved_ids_keeps_all_rows(db_session, db_session_factory):
+    mock_tg = AsyncMock()
+    first = make_saved_gift(0, "Visible Gift")
+    first.msg_id = 0
+    first.gift.gift_id = 111
+    first.date = 1700000001
+    second = make_saved_gift(0, "Visible Gift")
+    second.msg_id = 0
+    second.gift.gift_id = 111
+    second.date = 1700000001
+    mock_tg.get_saved_star_gifts = AsyncMock(return_value=[first, second])
+    mock_settings = MagicMock()
+    mock_settings.ton_to_stars_rate = 200.0
+
+    gift_repo = GiftRepository(db_session)
+    pricing = PricingService(mock_tg, mock_settings)
+    svc = InventoryService(mock_tg, gift_repo, pricing, mock_settings)
+
+    gifts = await svc.scan(owner_peer="@visible")
+    await db_session.commit()
+
+    assert len(gifts) == 2
+    assert gifts[0].telegram_gift_id == "@visible:visible:0:111:1700000001"
+    assert gifts[1].telegram_gift_id == "@visible:visible:1:111:1700000001"
+
+
+@pytest.mark.asyncio
 async def test_scan_empty(db_session, db_session_factory):
     mock_tg = AsyncMock()
     mock_tg.get_saved_star_gifts = AsyncMock(return_value=[])

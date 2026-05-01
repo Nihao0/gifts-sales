@@ -47,21 +47,28 @@ class InventoryService:
                 log.warning("inventory.scan.rate_fetch_failed", error=str(exc))
 
         persisted: list[Gift] = []
-        for raw in raw_gifts:
-            schema = self._parse(raw, rate, owner_peer)
+        for index, raw in enumerate(raw_gifts):
+            schema = self._parse(raw, rate, owner_peer, index=index)
             gift = await self._gift_repo.upsert(schema)
             persisted.append(gift)
 
         log.info("inventory.scan.done", persisted=len(persisted))
         return persisted
 
-    def _parse(self, raw: SavedStarGift, rate: float | None, owner_peer: str) -> GiftCreateSchema:
+    def _parse(
+        self,
+        raw: SavedStarGift,
+        rate: float | None,
+        owner_peer: str,
+        *,
+        index: int = 0,
+    ) -> GiftCreateSchema:
         resale_ton: float | None = None
         if raw.resale_stars and rate:
             resale_ton = self._pricing.stars_to_ton(raw.resale_stars, rate)
 
         return GiftCreateSchema(
-            telegram_gift_id=_local_gift_identity(raw.saved_id, owner_peer),
+            telegram_gift_id=_local_gift_identity(raw, owner_peer, index),
             owner_peer=owner_peer,
             msg_id=raw.msg_id,
             collectible_id=raw.gift.gift_id if raw.gift else None,
@@ -72,11 +79,19 @@ class InventoryService:
             is_for_sale=raw.is_for_sale,
             resale_price_stars=raw.resale_stars,
             resale_price_ton=resale_ton,
-            raw_json=json.dumps(raw.raw) if raw.raw else None,
+            raw_json=json.dumps(raw.raw, ensure_ascii=False) if raw.raw else None,
         )
 
 
-def _local_gift_identity(saved_id: int, owner_peer: str) -> str:
+def _local_gift_identity(raw: SavedStarGift, owner_peer: str, index: int = 0) -> str:
+    if raw.saved_id:
+        local_id = str(raw.saved_id)
+    elif raw.msg_id:
+        local_id = f"msg:{raw.msg_id}"
+    else:
+        gift_id = raw.gift.gift_id if raw.gift else 0
+        local_id = f"visible:{index}:{gift_id}:{raw.date}"
+
     if owner_peer == "self":
-        return str(saved_id)
-    return f"{owner_peer}:{saved_id}"
+        return local_id
+    return f"{owner_peer}:{local_id}"

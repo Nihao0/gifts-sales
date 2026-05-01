@@ -62,3 +62,29 @@ def test_portals_filter_floors_parses_attribute_floors():
     assert floors[0].gift_name == "Toy Bear"
     assert floors[0].model == "Wizard"
     assert floors[0].floor_price_ton == 10.0
+
+
+def test_portals_filter_floors_parses_live_collections_shape():
+    client = PortalsClient("https://portal-market.com/api", "tma test")
+
+    with patch.object(
+        client,
+        "_get",
+        return_value={
+            "collections": {
+                "toybear": {
+                    "models": [{"name": "Alter Ego", "floor_price": "35", "supply": 14}],
+                    "backdrops": [{"name": "Blue", "floor_price": "34"}],
+                    "symbols": [{"name": "Star", "floor_price": 42}],
+                }
+            },
+            "collection_floor_price": {"toybear": "34"},
+        },
+    ):
+        floors = client.filter_floors("Toy Bear")
+
+    assert len(floors) == 3
+    assert floors[0].model == "Alter Ego"
+    assert floors[0].floor_price_ton == 35.0
+    assert floors[1].backdrop == "Blue"
+    assert floors[2].symbol == "Star"

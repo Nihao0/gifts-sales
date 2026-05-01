@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -9,6 +10,8 @@ from rich.table import Table
 from app.config.settings import get_settings
 from app.client.telegram import TelegramClientContext
 from app.markets.portals import PortalsAuthError, PortalsClient, PortalsFloor, PortalsListing
+from app.models.gift import Gift
+from app.models.market import MarketFloor
 from app.schemas.market import MarketFloorCreateSchema, MarketListingCreateSchema
 from app.storage.database import get_session_factory, init_db
 from app.storage.gift_repo import GiftRepository
@@ -209,6 +212,42 @@ async def _portals_sync_floors(from_local: bool, owner_peer: str, limit: int) ->
     typer.echo(f"Synced {len(all_floors)} floor snapshot(s) for {len(gift_names)} gift name(s).")
 
 
+@portals_app.command("portfolio-report")
+def portals_portfolio_report(
+    owner_peer: str = typer.Option("self", "--owner-peer", help="Local gift owner peer"),
+    limit: int = typer.Option(25, "--limit", help="Rows to show"),
+) -> None:
+    """Show local gifts ranked by the best saved Portals attribute floor."""
+    asyncio.run(_portals_portfolio_report(owner_peer, limit))
+
+
+async def _portals_portfolio_report(owner_peer: str, limit: int) -> None:
+    settings = get_settings()
+    settings.ensure_data_dir()
+    configure_logging(settings.log_level, settings.log_format)
+    await init_db(settings.db_url)
+
+    sf = get_session_factory()
+    async with sf() as session:
+        gifts = await GiftRepository(session).list_all(owner_peer=owner_peer)
+        floors = await MarketRepository(session).latest_floors(market="portals", limit=100_000)
+
+    floor_index = _latest_floor_index(floors)
+    rows = []
+    for gift in gifts:
+        attrs = _gift_attributes(gift)
+        if not gift.title or not attrs:
+            continue
+        best = _best_floor_match(gift.title, attrs, floor_index)
+        if best is None:
+            continue
+        floor, source = best
+        rows.append((gift, attrs, floor, source))
+
+    rows.sort(key=lambda row: (row[2].floor_price_ton is not None, row[2].floor_price_ton or 0), reverse=True)
+    _render_portfolio_report(rows[:limit], owner_peer=owner_peer, total_matches=len(rows))
+
+
 async def _save_floors(db_url: str, floors: list[PortalsFloor]) -> None:
     await init_db(db_url)
     sf = get_session_factory()
@@ -257,6 +296,33 @@ def _render_floors(floors: list[PortalsFloor]) -> None:
     console.print(table)
 
 
+def _render_portfolio_report(
+    rows: list[tuple[Gift, dict[str, str], MarketFloor, str]],
+    *,
+    owner_peer: str,
+    total_matches: int,
+) -> None:
+    table = Table(title=f"Portals Portfolio Report: {owner_peer} ({total_matches} matches)")
+    table.add_column("Gift")
+    table.add_column("Slug", style="dim")
+    table.add_column("Model")
+    table.add_column("Backdrop")
+    table.add_column("Symbol")
+    table.add_column("Signal")
+    table.add_column("Floor TON", style="yellow")
+    for gift, attrs, floor, source in rows:
+        table.add_row(
+            gift.title or "-",
+            gift.slug or "-",
+            attrs.get("model", "-"),
+            attrs.get("backdrop", "-"),
+            attrs.get("symbol", "-"),
+            source,
+            f"{floor.floor_price_ton:.4f}" if floor.floor_price_ton is not None else "-",
+        )
+    console.print(table)
+
+
 def _floor_schema(floor: PortalsFloor) -> MarketFloorCreateSchema:
     return MarketFloorCreateSchema(
         market="portals",
@@ -282,3 +348,66 @@ def _listing_schema(listing: PortalsListing) -> MarketListingCreateSchema:
         price_ton=listing.price_ton,
         raw_json=json.dumps(listing.raw, ensure_ascii=False),
     )
+
+
+def _latest_floor_index(floors: list[MarketFloor]) -> dict[tuple[str, str, str], MarketFloor]:
+    index: dict[tuple[str, str, str], MarketFloor] = {}
+    for floor in sorted(floors, key=lambda item: (item.captured_at, item.id)):
+        if floor.model:
+            index[(_norm(floor.gift_name), "model", _norm(floor.model))] = floor
+        if floor.backdrop:
+            index[(_norm(floor.gift_name), "backdrop", _norm(floor.backdrop))] = floor
+        if floor.symbol:
+            index[(_norm(floor.gift_name), "symbol", _norm(floor.symbol))] = floor
+    return index
+
+
+def _best_floor_match(
+    gift_name: str,
+    attrs: dict[str, str],
+    floor_index: dict[tuple[str, str, str], MarketFloor],
+) -> tuple[MarketFloor, str] | None:
+    matches: list[tuple[MarketFloor, str]] = []
+    for source in ("model", "symbol", "backdrop"):
+        value = attrs.get(source)
+        if not value:
+            continue
+        floor = floor_index.get((_norm(gift_name), source, _norm(value)))
+        if floor is not None:
+            matches.append((floor, source))
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0].floor_price_ton or 0)
+
+
+def _gift_attributes(gift: Gift) -> dict[str, str]:
+    if not gift.raw_json:
+        return {}
+    try:
+        raw = json.loads(gift.raw_json)
+    except json.JSONDecodeError:
+        return {}
+    raw_attrs = (((raw.get("gift") or {}).get("attributes")) if isinstance(raw, dict) else None) or []
+    attrs: dict[str, str] = {}
+    for item in raw_attrs:
+        if not isinstance(item, dict):
+            continue
+        key = _attribute_key(item.get("_"))
+        name = item.get("name")
+        if key and isinstance(name, str) and name:
+            attrs[key] = name
+    return attrs
+
+
+def _attribute_key(raw_type: Any) -> str | None:
+    if raw_type == "StarGiftAttributeModel":
+        return "model"
+    if raw_type == "StarGiftAttributeBackdrop":
+        return "backdrop"
+    if raw_type == "StarGiftAttributePattern":
+        return "symbol"
+    return None
+
+
+def _norm(value: str) -> str:
+    return " ".join(value.casefold().split())

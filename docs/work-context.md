@@ -278,7 +278,7 @@ DB_URL=sqlite+aiosqlite:///data/gifts.db
 
 PORTALS_RECIPIENT=@portals
 PORTALS_AUTH_DATA=tma ...
-PORTALS_API_BASE=https://portals-market.com/api
+PORTALS_API_BASE=https://portal-market.com/api
 TON_TO_STARS_RATE=100.0
 REQUIRE_TON_RATE_FOR_SALES=true
 MAX_BULK_JOBS=50
@@ -420,3 +420,25 @@ gifts-sales gifts plan-portals-listing --policy-file rules/portals_listing_polic
 - Any buy/list/change-price action must go through approval requests.
 - GetGems is on-chain; never put private keys into this app until a separate wallet/agentic-wallet design is approved.
 - Do not automate paid transfer flows without explicit confirmation.
+
+## 2026-05-01 Live Portals/Profile Test
+
+Current Telegram session:
+- Logged in with the local Telethon session.
+- Used `@segamegahigh` as the visible profile to scan.
+
+What worked:
+- `gifts-sales gifts scan --peer @segamegahigh` fetched 2686 visible gifts.
+- The first scan exposed a bug: visible profile gifts can arrive without `saved_id`/`msg_id`, so all rows collapsed into `@segamegahigh:0`.
+- Fixed the local identity fallback to use `visible:{index}:{gift_id}:{date}` when Telegram does not provide a saved/message id.
+- Re-scanned and cleaned the stale `@segamegahigh:0` artifact. Local DB now has 2686 distinct rows for `@segamegahigh`.
+- 2027 of those rows have collection titles and can be mapped to Portals-style collection names.
+- Portals live `collections/filters?short_names=...` currently returns `collections -> <short_name> -> models/backdrops/symbols`; parser now supports that shape.
+- `markets portals filter-floors --gift-name "Toy Bear"` returned 394 attribute floor rows.
+- `markets portals sync-floors --from-local --owner-peer @segamegahigh --limit 5` saved 1799 floor rows for 5 local collections.
+- Added `markets portals portfolio-report --owner-peer @segamegahigh --limit 15`; first run found 208 local gifts with saved Portals attribute-floor matches.
+
+Important interpretation:
+- `portfolio-report` is a research ranking, not a final pricing engine.
+- It ranks by the highest matching attribute floor among model/backdrop/symbol. A high symbol floor can be a useful signal, but it does not guarantee the exact combined gift will sell at that price.
+- Next pricing step should combine exact listing search where possible, collection floor, model floor, symbol floor, backdrop floor, rarity/supply, and manual approval thresholds.

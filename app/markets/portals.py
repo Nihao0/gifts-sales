@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
+
+import certifi
 
 
 PORTALS_MARKET = "portals"
@@ -105,9 +108,14 @@ class PortalsClient:
     def filter_floors(self, gift_name: str) -> list[PortalsFloor]:
         short_name = _short_name(gift_name)
         payload = self._get(f"collections/filters?short_names={quote_plus(short_name)}")
-        raw = payload.get("floor_prices", payload) if isinstance(payload, dict) else payload
-        if isinstance(raw, dict) and short_name in raw:
-            raw = raw[short_name]
+        raw = payload
+        if isinstance(payload, dict):
+            collections = payload.get("collections")
+            floor_prices = payload.get("floor_prices") or payload.get("floorPrices")
+            if isinstance(collections, dict) and short_name in collections:
+                raw = collections[short_name]
+            elif isinstance(floor_prices, dict) and short_name in floor_prices:
+                raw = floor_prices[short_name]
         return _parse_attribute_floors(gift_name, raw)
 
     def _get(self, path: str) -> Any:
@@ -128,7 +136,8 @@ class PortalsClient:
             method="GET",
         )
         try:
-            with urlopen(request, timeout=20) as response:
+            context = ssl.create_default_context(cafile=certifi.where())
+            with urlopen(request, timeout=20, context=context) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
