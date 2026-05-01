@@ -116,13 +116,21 @@ gifts-sales markets portals filter-floors --gift-name "Toy Bear" --save
 # Sync attribute floors for local gifts from a scanned profile
 gifts-sales markets portals sync-floors --from-local --owner-peer @some_profile --limit 5
 
-# Rank local gifts by the best saved Portals attribute-floor signal
+# Rank local gifts by saved Portals attribute-floor signals
 gifts-sales markets portals portfolio-report --owner-peer @some_profile --limit 25
+
+# Export every local gift, including gifts without saved Portals market data
+gifts-sales markets portals portfolio-report \
+  --owner-peer @some_profile \
+  --include-unmatched \
+  --output data/profile_portals_report.csv \
+  --format csv
 ```
 
 Portals floor signals are research data, not automatic listing prices. The
-attribute report uses the highest matching model/backdrop/symbol floor saved in
-the local database, so every candidate still needs manual review before sale.
+attribute report shows collection/model/symbol/backdrop floors separately,
+marks the strongest signal, and gives a conservative next action. Telegram
+internal market prices still need to be checked before final sale decisions.
 
 ### Show details for a specific gift
 

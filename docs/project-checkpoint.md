@@ -62,7 +62,10 @@ Portals research:
 - `gifts-sales markets portals sync-floors --from-local --owner-peer @profile`
   fetches floors only for collection titles that already exist locally.
 - `gifts-sales markets portals portfolio-report --owner-peer @profile` ranks
-  local gifts by the best saved matching Portals attribute-floor signal.
+  local gifts by saved Portals attribute-floor signals and explains collection,
+  model, symbol, and backdrop floors separately.
+- `portfolio-report --include-unmatched --output ...` exports every local gift,
+  including gifts that do not yet have saved Portals market data.
 
 Write operations:
 
@@ -108,8 +111,10 @@ Portals checks:
 - `filter-floors --gift-name "Toy Bear"` returned `394` attribute floors.
 - `sync-floors --from-local --owner-peer @segamegahigh --limit 5` saved `1799`
   floor rows.
-- `portfolio-report --owner-peer @segamegahigh --limit 15` found `208` matched
-  local gifts using the saved floor data.
+- The first `portfolio-report --owner-peer @segamegahigh --limit 15` found
+  `208` matched local gifts using the saved floor data.
+- The improved report can export all `2686` profile gifts with
+  `--include-unmatched --output data/segamegahigh_portals_report.csv`.
 
 Verification:
 
@@ -169,6 +174,16 @@ Show ranked report:
   --limit 25
 ```
 
+Export every profile gift, including rows where market data has not been synced:
+
+```bash
+.venv/bin/gifts-sales markets portals portfolio-report \
+  --owner-peer @segamegahigh \
+  --include-unmatched \
+  --output data/segamegahigh_portals_report.csv \
+  --format csv
+```
+
 Run checks:
 
 ```bash
@@ -180,9 +195,10 @@ Run checks:
 
 `portfolio-report` is only a research signal.
 
-It ranks by the highest matching Portals attribute floor among model, backdrop,
-and symbol. A high symbol floor can indicate value, but it is not the same as an
-exact price for the full combination of model + backdrop + symbol.
+It now shows collection/model/symbol/backdrop floors separately and then marks
+the strongest saved signal. A high symbol floor can indicate value, but it is
+not the same as an exact price for the full combination of model + backdrop +
+symbol.
 
 Before listing, the pricing engine should combine:
 

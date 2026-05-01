@@ -1,5 +1,7 @@
 import asyncio
+import csv
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,24 @@ markets_app = typer.Typer(help="Market research commands")
 portals_app = typer.Typer(help="Portals market research")
 markets_app.add_typer(portals_app, name="portals")
 console = Console()
+
+
+@dataclass(frozen=True)
+class PortfolioReportRow:
+    gift_id: int | None
+    title: str
+    slug: str | None
+    model: str | None
+    backdrop: str | None
+    symbol: str | None
+    collection_floor_ton: float | None
+    model_floor_ton: float | None
+    symbol_floor_ton: float | None
+    backdrop_floor_ton: float | None
+    best_signal: str
+    best_floor_ton: float | None
+    confidence: str
+    action: str
 
 
 @portals_app.command("auth")
@@ -216,12 +236,25 @@ async def _portals_sync_floors(from_local: bool, owner_peer: str, limit: int) ->
 def portals_portfolio_report(
     owner_peer: str = typer.Option("self", "--owner-peer", help="Local gift owner peer"),
     limit: int = typer.Option(25, "--limit", help="Rows to show"),
+    include_unmatched: bool = typer.Option(
+        False,
+        "--include-unmatched",
+        help="Include local gifts without saved Portals market data",
+    ),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Optional CSV/JSON output path"),
+    format: str = typer.Option("csv", "--format", help="Export format when --output is used: csv or json"),
 ) -> None:
     """Show local gifts ranked by the best saved Portals attribute floor."""
-    asyncio.run(_portals_portfolio_report(owner_peer, limit))
+    asyncio.run(_portals_portfolio_report(owner_peer, limit, include_unmatched, output, format))
 
 
-async def _portals_portfolio_report(owner_peer: str, limit: int) -> None:
+async def _portals_portfolio_report(
+    owner_peer: str,
+    limit: int,
+    include_unmatched: bool,
+    output: Path | None,
+    format: str,
+) -> None:
     settings = get_settings()
     settings.ensure_data_dir()
     configure_logging(settings.log_level, settings.log_format)
@@ -232,19 +265,19 @@ async def _portals_portfolio_report(owner_peer: str, limit: int) -> None:
         gifts = await GiftRepository(session).list_all(owner_peer=owner_peer)
         floors = await MarketRepository(session).latest_floors(market="portals", limit=100_000)
 
+    collection_floor_index = _latest_collection_floor_index(floors)
     floor_index = _latest_floor_index(floors)
-    rows = []
-    for gift in gifts:
-        attrs = _gift_attributes(gift)
-        if not gift.title or not attrs:
-            continue
-        best = _best_floor_match(gift.title, attrs, floor_index)
-        if best is None:
-            continue
-        floor, source = best
-        rows.append((gift, attrs, floor, source))
+    rows = _build_portfolio_report_rows(
+        gifts,
+        collection_floor_index,
+        floor_index,
+        include_unmatched=include_unmatched,
+    )
 
-    rows.sort(key=lambda row: (row[2].floor_price_ton is not None, row[2].floor_price_ton or 0), reverse=True)
+    rows.sort(key=lambda row: (row.best_floor_ton is not None, row.best_floor_ton or 0), reverse=True)
+    if output is not None:
+        _write_portfolio_report(rows, output, format)
+        typer.echo(f"Exported {len(rows)} portfolio report row(s) to {output}.")
     _render_portfolio_report(rows[:limit], owner_peer=owner_peer, total_matches=len(rows))
 
 
@@ -297,28 +330,28 @@ def _render_floors(floors: list[PortalsFloor]) -> None:
 
 
 def _render_portfolio_report(
-    rows: list[tuple[Gift, dict[str, str], MarketFloor, str]],
+    rows: list[PortfolioReportRow],
     *,
     owner_peer: str,
     total_matches: int,
 ) -> None:
     table = Table(title=f"Portals Portfolio Report: {owner_peer} ({total_matches} matches)")
+    table.add_column("ID", style="dim", no_wrap=True)
     table.add_column("Gift")
-    table.add_column("Slug", style="dim")
-    table.add_column("Model")
-    table.add_column("Backdrop")
-    table.add_column("Symbol")
-    table.add_column("Signal")
-    table.add_column("Floor TON", style="yellow")
-    for gift, attrs, floor, source in rows:
+    table.add_column("Attributes")
+    table.add_column("Floors TON\nC / M / S / B", style="yellow")
+    table.add_column("Best", no_wrap=True)
+    table.add_column("Conf", no_wrap=True)
+    table.add_column("Next")
+    for row in rows:
         table.add_row(
-            gift.title or "-",
-            gift.slug or "-",
-            attrs.get("model", "-"),
-            attrs.get("backdrop", "-"),
-            attrs.get("symbol", "-"),
-            source,
-            f"{floor.floor_price_ton:.4f}" if floor.floor_price_ton is not None else "-",
+            str(row.gift_id or "-"),
+            _gift_label(row),
+            _attribute_label(row),
+            _floor_label(row),
+            f"{row.best_signal} {_format_ton(row.best_floor_ton)}",
+            row.confidence,
+            row.action,
         )
     console.print(table)
 
@@ -360,6 +393,221 @@ def _latest_floor_index(floors: list[MarketFloor]) -> dict[tuple[str, str, str],
         if floor.symbol:
             index[(_norm(floor.gift_name), "symbol", _norm(floor.symbol))] = floor
     return index
+
+
+def _latest_collection_floor_index(floors: list[MarketFloor]) -> dict[str, MarketFloor]:
+    index: dict[str, MarketFloor] = {}
+    for floor in sorted(floors, key=lambda item: (item.captured_at, item.id)):
+        if not floor.model and not floor.backdrop and not floor.symbol:
+            index[_norm(floor.gift_name)] = floor
+    return index
+
+
+def _build_portfolio_report_rows(
+    gifts: list[Gift],
+    collection_floor_index: dict[str, MarketFloor],
+    floor_index: dict[tuple[str, str, str], MarketFloor],
+    *,
+    include_unmatched: bool = False,
+) -> list[PortfolioReportRow]:
+    rows: list[PortfolioReportRow] = []
+    for gift in gifts:
+        row = _build_portfolio_report_row(
+            gift,
+            collection_floor_index,
+            floor_index,
+            include_unmatched=include_unmatched,
+        )
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def _build_portfolio_report_row(
+    gift: Gift,
+    collection_floor_index: dict[str, MarketFloor],
+    floor_index: dict[tuple[str, str, str], MarketFloor],
+    *,
+    include_unmatched: bool = False,
+) -> PortfolioReportRow | None:
+    if not gift.title:
+        if not include_unmatched:
+            return None
+        return PortfolioReportRow(
+            gift_id=gift.id,
+            title="-",
+            slug=gift.slug,
+            model=None,
+            backdrop=None,
+            symbol=None,
+            collection_floor_ton=None,
+            model_floor_ton=None,
+            symbol_floor_ton=None,
+            backdrop_floor_ton=None,
+            best_signal="none",
+            best_floor_ton=None,
+            confidence="unknown",
+            action="missing gift title",
+        )
+
+    attrs = _gift_attributes(gift)
+    collection_floor = collection_floor_index.get(_norm(gift.title))
+    model_floor = _attribute_floor(gift.title, "model", attrs.get("model"), floor_index)
+    symbol_floor = _attribute_floor(gift.title, "symbol", attrs.get("symbol"), floor_index)
+    backdrop_floor = _attribute_floor(gift.title, "backdrop", attrs.get("backdrop"), floor_index)
+
+    candidates = [
+        ("collection", _floor_ton(collection_floor)),
+        ("model", _floor_ton(model_floor)),
+        ("symbol", _floor_ton(symbol_floor)),
+        ("backdrop", _floor_ton(backdrop_floor)),
+    ]
+    candidates = [(source, value) for source, value in candidates if value is not None]
+    if not candidates:
+        if not include_unmatched:
+            return None
+        return PortfolioReportRow(
+            gift_id=gift.id,
+            title=gift.title,
+            slug=gift.slug,
+            model=attrs.get("model"),
+            backdrop=attrs.get("backdrop"),
+            symbol=attrs.get("symbol"),
+            collection_floor_ton=None,
+            model_floor_ton=None,
+            symbol_floor_ton=None,
+            backdrop_floor_ton=None,
+            best_signal="none",
+            best_floor_ton=None,
+            confidence="unknown",
+            action="sync market data",
+        )
+
+    best_signal, best_floor_ton = max(candidates, key=lambda item: item[1])
+    confidence = _confidence_for_signal(
+        best_signal,
+        model_floor_ton=_floor_ton(model_floor),
+        symbol_floor_ton=_floor_ton(symbol_floor),
+        backdrop_floor_ton=_floor_ton(backdrop_floor),
+    )
+    return PortfolioReportRow(
+        gift_id=gift.id,
+        title=gift.title,
+        slug=gift.slug,
+        model=attrs.get("model"),
+        backdrop=attrs.get("backdrop"),
+        symbol=attrs.get("symbol"),
+        collection_floor_ton=_floor_ton(collection_floor),
+        model_floor_ton=_floor_ton(model_floor),
+        symbol_floor_ton=_floor_ton(symbol_floor),
+        backdrop_floor_ton=_floor_ton(backdrop_floor),
+        best_signal=best_signal,
+        best_floor_ton=best_floor_ton,
+        confidence=confidence,
+        action=_action_for_confidence(confidence),
+    )
+
+
+def _attribute_floor(
+    gift_name: str,
+    source: str,
+    value: str | None,
+    floor_index: dict[tuple[str, str, str], MarketFloor],
+) -> MarketFloor | None:
+    if not value:
+        return None
+    return floor_index.get((_norm(gift_name), source, _norm(value)))
+
+
+def _floor_ton(floor: MarketFloor | None) -> float | None:
+    if floor is None:
+        return None
+    return floor.floor_price_ton
+
+
+def _confidence_for_signal(
+    best_signal: str,
+    *,
+    model_floor_ton: float | None,
+    symbol_floor_ton: float | None,
+    backdrop_floor_ton: float | None,
+) -> str:
+    if best_signal == "model":
+        return "high"
+    attribute_values = [
+        value for value in (model_floor_ton, symbol_floor_ton, backdrop_floor_ton) if value is not None
+    ]
+    best_attribute = max(attribute_values) if attribute_values else None
+    supporting_attributes = 0
+    if best_attribute:
+        supporting_attributes = sum(value >= best_attribute * 0.8 for value in attribute_values)
+    if supporting_attributes >= 2:
+        return "high"
+    if best_signal in {"symbol", "backdrop"}:
+        return "medium"
+    return "low"
+
+
+def _action_for_confidence(confidence: str) -> str:
+    if confidence == "high":
+        return "verify exact listing"
+    if confidence == "medium":
+        return "check exact listing"
+    return "sync more data"
+
+
+def _write_portfolio_report(rows: list[PortfolioReportRow], output: Path, format: str) -> None:
+    normalized_format = format.lower()
+    data = [_portfolio_row_dict(row) for row in rows]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if normalized_format == "json":
+        output.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return
+    if normalized_format == "csv":
+        with output.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=PORTFOLIO_REPORT_FIELDS)
+            writer.writeheader()
+            writer.writerows(data)
+        return
+    typer.echo("Unknown format. Valid: csv, json")
+    raise typer.Exit(1)
+
+
+PORTFOLIO_REPORT_FIELDS = [
+    "gift_id",
+    "title",
+    "slug",
+    "model",
+    "backdrop",
+    "symbol",
+    "collection_floor_ton",
+    "model_floor_ton",
+    "symbol_floor_ton",
+    "backdrop_floor_ton",
+    "best_signal",
+    "best_floor_ton",
+    "confidence",
+    "action",
+]
+
+
+def _portfolio_row_dict(row: PortfolioReportRow) -> dict[str, Any]:
+    return {
+        "gift_id": row.gift_id,
+        "title": row.title,
+        "slug": row.slug,
+        "model": row.model,
+        "backdrop": row.backdrop,
+        "symbol": row.symbol,
+        "collection_floor_ton": row.collection_floor_ton,
+        "model_floor_ton": row.model_floor_ton,
+        "symbol_floor_ton": row.symbol_floor_ton,
+        "backdrop_floor_ton": row.backdrop_floor_ton,
+        "best_signal": row.best_signal,
+        "best_floor_ton": row.best_floor_ton,
+        "confidence": row.confidence,
+        "action": row.action,
+    }
 
 
 def _best_floor_match(
@@ -411,3 +659,34 @@ def _attribute_key(raw_type: Any) -> str | None:
 
 def _norm(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _format_ton(value: float | None) -> str:
+    return f"{value:.4f}" if value is not None else "-"
+
+
+def _gift_label(row: PortfolioReportRow) -> str:
+    if row.slug:
+        return f"{row.title}\n{row.slug}"
+    return row.title
+
+
+def _attribute_label(row: PortfolioReportRow) -> str:
+    return "\n".join(
+        [
+            f"M: {row.model or '-'}",
+            f"S: {row.symbol or '-'}",
+            f"B: {row.backdrop or '-'}",
+        ]
+    )
+
+
+def _floor_label(row: PortfolioReportRow) -> str:
+    return " / ".join(
+        [
+            _format_ton(row.collection_floor_ton),
+            _format_ton(row.model_floor_ton),
+            _format_ton(row.symbol_floor_ton),
+            _format_ton(row.backdrop_floor_ton),
+        ]
+    )
