@@ -1,0 +1,18 @@
+# Portals automation policy.
+# Start conservative: create approval requests, but do not auto-approve.
+
+portals:
+  name: default_portals
+  # recipient can be omitted here if PORTALS_RECIPIENT is set in .env
+  # recipient: "@portals"
+  auto_approve: false
+  max_requests_per_plan: 10
+  match:
+    owner_peer: self
+    include_for_sale: false
+    # Example: avoid rare gifts in the default plan.
+    min_availability_total: 1000
+    exclude_title_contains: []
+  require_approval_if:
+    max_availability_total_below: 5000
+    title_contains: []

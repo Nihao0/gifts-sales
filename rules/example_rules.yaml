@@ -1,0 +1,40 @@
+# Gifts Sales — Bulk Listing Rules
+# Rules are evaluated in order; the first matching rule per gift wins.
+# All match criteria are optional — omit to match all gifts.
+
+rules:
+  # List rare collectibles (issued < 1 000) for 25 TON
+  - name: rare_gifts
+    match:
+      max_availability_total: 1000
+      is_for_sale: false
+    action: list
+    price_ton: 25.0
+    dry_run: false
+    max_attempts: 5
+
+  # List common gifts (total supply > 1 000) for 2.5 TON
+  - name: common_gifts
+    match:
+      min_availability_total: 1001
+      is_for_sale: false
+    action: list
+    price_ton: 2.5
+    dry_run: false
+    max_attempts: 3
+
+  # Preview delisting currently-listed rare gifts (dry-run)
+  - name: delist_rare_preview
+    match:
+      max_availability_total: 500
+      is_for_sale: true
+    action: delist
+    dry_run: true
+
+  # List a specific collectible by exact ID
+  # - name: specific_collectible
+  #   match:
+  #     collectible_id: 7261748364
+  #   action: list
+  #   price_ton: 100.0
+  #   max_attempts: 10
