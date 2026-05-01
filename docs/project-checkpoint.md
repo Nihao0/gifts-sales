@@ -255,42 +255,71 @@ the same backdrop was `19.99`. Exact listing search wins for sale decisions.
 
 High priority:
 
-1. Add a dedicated `research` command group or service layer so the workflow is
+1. Add exact Portals listing verification for all profile collections and sale
+   candidates:
+   - do not limit exact checks to `Durov’s Cap`;
+   - iterate through every collection represented in the scanned profile;
+   - for each candidate gift, query exact Portals listings with `collection_ids`
+     plus available model/backdrop/symbol filters;
+   - store exact listing snapshots separately from filter hints;
+   - prefer exact listing floor over `collections/filters` hints for any sale
+     decision;
+   - record whether the exact match was collection-only, model-only,
+     backdrop-only, symbol-only, or full model+backdrop+symbol;
+   - include exact listing price and confidence in the candidate report.
+
+2. Work on the Portals gift-transfer/listing workflow:
+   - confirm the correct Portals recipient/account for transferring gifts;
+   - verify the Telegram transfer path for collectible gifts that must move into
+     Portals before they appear in the Portals market;
+   - keep `send-to-portals --dry-run` as the first step for every gift;
+   - after transfer, poll/refresh Portals to detect that the gift appeared in
+     the Portals inventory/market tooling;
+   - only then create a listing plan with price and approval;
+   - do not automate paid transfer checkout until the exact flow and fees are
+     understood and explicitly approved.
+
+3. Add a dedicated `research` command group or service layer so the workflow is
    explicit:
    - `research scan-profile --peer @segamegahigh`;
    - `research sync-portals --owner-peer @segamegahigh`;
+   - `research verify-portals-listings --owner-peer @segamegahigh`;
    - `research sync-telegram-market --owner-peer @segamegahigh`;
    - `research report --owner-peer @segamegahigh`.
 
-2. Improve Portals sync so it defaults to relevant local profile gifts:
+4. Improve Portals sync so it defaults to relevant local profile gifts:
    - avoid broad market scans;
    - dedupe collection names;
    - store one latest snapshot per collection/attribute where possible;
    - make terminal output compact by default.
 
-3. Add a pricing/candidate table or view:
+5. Add a pricing/candidate table or view:
    - local gift id;
    - owner peer;
    - title;
    - slug;
    - model/backdrop/symbol;
-   - best floor signal;
-   - signal type;
+   - best filter hint;
+   - exact Portals listing floor;
+   - Telegram internal market floor;
    - confidence;
    - suggested listing price;
+   - suggested destination market;
+   - transfer/listing status;
    - reason.
 
-4. Add Telegram internal marketplace research:
+6. Add Telegram internal marketplace research:
    - inspect which MTProto methods can return resale/listing options for the
      exact local gifts;
    - handle current `INPUT_METHOD_INVALID...` error gracefully;
    - persist useful internal-market snapshots.
 
-5. Add approval-first sell workflow:
+7. Add approval-first sell workflow:
    - plan candidates;
    - create approval requests;
    - user approves manually;
-   - executor transfers/lists only approved items.
+   - executor transfers/lists only approved items;
+   - record transfer result and listing result separately.
 
 Keep the sale path in mind while improving research: every report row should
 eventually be convertible into a sale candidate with exact listing verification,
