@@ -10,6 +10,9 @@ Related focused notes:
 - `docs/sales-workflow-notes.md` — current thinking on Telegram market listing,
   Portals transfer, bulk execution, approvals, and why execution workflow is now
   higher priority than broad price scraping.
+- `docs/market-operations-guide.md` — practical handoff guide for another agent:
+  commands, auth, Telegram market listing, Portals exact search, Portals
+  transfer, approvals, and safety rules.
 
 ## Project Goal
 

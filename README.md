@@ -24,6 +24,11 @@ Start future sessions with [`docs/project-checkpoint.md`](docs/project-checkpoin
 It summarizes the live `@segamegahigh` scan, Portals floor research, current
 limits, and the next implementation plan.
 
+For operational handoff, read
+[`docs/market-operations-guide.md`](docs/market-operations-guide.md). It explains
+Telegram market listing, Portals research, exact listing checks, transfers,
+approvals, and safety rules.
+
 ## Requirements
 
 - Python 3.12+
