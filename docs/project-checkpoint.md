@@ -115,6 +115,15 @@ Portals checks:
   `208` matched local gifts using the saved floor data.
 - The improved report can export all `2686` profile gifts with
   `--include-unmatched --output data/segamegahigh_portals_report.csv`.
+- Full profile Portals sync later requested all `82` local collection titles,
+  received attribute floors for `81` collections, and saved `26255` floor rows.
+- After the full sync, `data/segamegahigh_portals_report.csv` contained:
+  - `2686` total local gift rows;
+  - `2025` rows with a Portals best-floor signal;
+  - `1582` high-confidence rows;
+  - `424` medium-confidence rows;
+  - `19` low-confidence rows;
+  - `661` unknown rows, mostly gifts without Telegram title metadata.
 
 Verification:
 
@@ -164,6 +173,16 @@ Sync a small Portals sample:
   --from-local \
   --owner-peer @segamegahigh \
   --limit 5
+```
+
+Sync all local profile collections:
+
+```bash
+.venv/bin/gifts-sales markets portals sync-floors \
+  --from-local \
+  --owner-peer @segamegahigh \
+  --limit 1000 \
+  --no-render
 ```
 
 Show ranked report:
@@ -252,6 +271,10 @@ High priority:
    - create approval requests;
    - user approves manually;
    - executor transfers/lists only approved items.
+
+Keep the sale path in mind while improving research: every report row should
+eventually be convertible into a sale candidate with exact listing verification,
+suggested price, market destination, and approval status.
 
 Medium priority:
 

@@ -11,7 +11,7 @@ from rich.table import Table
 
 from app.config.settings import get_settings
 from app.client.telegram import TelegramClientContext
-from app.markets.portals import PortalsAuthError, PortalsClient, PortalsFloor, PortalsListing
+from app.markets.portals import PortalsApiError, PortalsAuthError, PortalsClient, PortalsFloor, PortalsListing
 from app.models.gift import Gift
 from app.models.market import MarketFloor
 from app.schemas.market import MarketFloorCreateSchema, MarketListingCreateSchema
@@ -198,12 +198,13 @@ def portals_sync_floors(
     from_local: bool = typer.Option(False, "--from-local", help="Use local self gifts as input"),
     owner_peer: str = typer.Option("self", "--owner-peer", help="Local gift owner peer"),
     limit: int = typer.Option(50, "--limit", help="Max unique gift names to sync"),
+    render: bool = typer.Option(False, "--render/--no-render", help="Render every fetched floor row"),
 ) -> None:
     """Fetch and persist Portals floors for local gift collections."""
-    asyncio.run(_portals_sync_floors(from_local, owner_peer, limit))
+    asyncio.run(_portals_sync_floors(from_local, owner_peer, limit, render))
 
 
-async def _portals_sync_floors(from_local: bool, owner_peer: str, limit: int) -> None:
+async def _portals_sync_floors(from_local: bool, owner_peer: str, limit: int, render: bool) -> None:
     if not from_local:
         typer.echo("Currently only --from-local is supported.")
         raise typer.Exit(1)
@@ -220,16 +221,23 @@ async def _portals_sync_floors(from_local: bool, owner_peer: str, limit: int) ->
 
     client = PortalsClient(settings.portals_api_base, settings.portals_auth_data)
     all_floors: list[PortalsFloor] = []
+    failed: list[tuple[str, str]] = []
     try:
         for gift_name in gift_names:
-            all_floors.extend(client.filter_floors(gift_name))
+            try:
+                floors = client.filter_floors(gift_name)
+            except PortalsApiError as exc:
+                failed.append((gift_name, str(exc)))
+                continue
+            all_floors.extend(floors)
     except PortalsAuthError as exc:
         typer.echo(str(exc))
         raise typer.Exit(1)
 
     await _save_floors(settings.db_url, all_floors)
-    _render_floors(all_floors)
-    typer.echo(f"Synced {len(all_floors)} floor snapshot(s) for {len(gift_names)} gift name(s).")
+    if render:
+        _render_floors(all_floors)
+    _render_sync_summary(gift_names, all_floors, failed)
 
 
 @portals_app.command("portfolio-report")
@@ -329,6 +337,33 @@ def _render_floors(floors: list[PortalsFloor]) -> None:
     console.print(table)
 
 
+def _render_sync_summary(
+    gift_names: list[str],
+    floors: list[PortalsFloor],
+    failed: list[tuple[str, str]],
+) -> None:
+    by_gift: dict[str, int] = {}
+    for floor in floors:
+        by_gift[floor.gift_name] = by_gift.get(floor.gift_name, 0) + 1
+
+    table = Table(title="Portals Floor Sync Summary")
+    table.add_column("Metric")
+    table.add_column("Value", style="yellow")
+    table.add_row("Gift collections requested", str(len(gift_names)))
+    table.add_row("Collections with floors", str(len(by_gift)))
+    table.add_row("Floor rows saved", str(len(floors)))
+    table.add_row("Failed collections", str(len(failed)))
+    console.print(table)
+
+    if failed:
+        failed_table = Table(title="Failed Collections")
+        failed_table.add_column("Gift")
+        failed_table.add_column("Error")
+        for gift_name, error in failed[:20]:
+            failed_table.add_row(gift_name, error[:160])
+        console.print(failed_table)
+
+
 def _render_portfolio_report(
     rows: list[PortfolioReportRow],
     *,
@@ -399,7 +434,7 @@ def _latest_collection_floor_index(floors: list[MarketFloor]) -> dict[str, Marke
     index: dict[str, MarketFloor] = {}
     for floor in sorted(floors, key=lambda item: (item.captured_at, item.id)):
         if not floor.model and not floor.backdrop and not floor.symbol:
-            index[_norm(floor.gift_name)] = floor
+            index[_collection_norm(floor.gift_name)] = floor
     return index
 
 
@@ -451,7 +486,7 @@ def _build_portfolio_report_row(
         )
 
     attrs = _gift_attributes(gift)
-    collection_floor = collection_floor_index.get(_norm(gift.title))
+    collection_floor = collection_floor_index.get(_collection_norm(gift.title))
     model_floor = _attribute_floor(gift.title, "model", attrs.get("model"), floor_index)
     symbol_floor = _attribute_floor(gift.title, "symbol", attrs.get("symbol"), floor_index)
     backdrop_floor = _attribute_floor(gift.title, "backdrop", attrs.get("backdrop"), floor_index)
@@ -659,6 +694,10 @@ def _attribute_key(raw_type: Any) -> str | None:
 
 def _norm(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _collection_norm(value: str) -> str:
+    return "".join(ch for ch in value.casefold() if ch.isalnum())
 
 
 def _format_ton(value: float | None) -> str:

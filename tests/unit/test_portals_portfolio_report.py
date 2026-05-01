@@ -144,6 +144,38 @@ def test_portfolio_report_row_explains_all_floor_signals():
     assert row.action == "check exact listing"
 
 
+def test_collection_floor_matches_short_portals_collection_name():
+    now = datetime.now(timezone.utc)
+    gift = Gift(
+        id=9,
+        telegram_gift_id="9",
+        owner_peer="@visible",
+        title="B-Day Candle",
+        slug="BDayCandle-1",
+        raw_json=json.dumps({"gift": {"attributes": []}}),
+    )
+    floors = [
+        MarketFloor(
+            id=1,
+            market="portals",
+            gift_name="bdaycandle",
+            floor_price_ton=4.11,
+            captured_at=now,
+        )
+    ]
+
+    rows = _build_portfolio_report_rows(
+        [gift],
+        _latest_collection_floor_index(floors),
+        _latest_floor_index(floors),
+    )
+
+    assert len(rows) == 1
+    assert rows[0].collection_floor_ton == 4.11
+    assert rows[0].best_signal == "collection"
+    assert rows[0].confidence == "low"
+
+
 def test_portfolio_report_can_include_unmatched_gifts():
     gift = Gift(
         id=8,

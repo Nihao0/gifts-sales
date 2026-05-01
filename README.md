@@ -114,7 +114,7 @@ gifts-sales markets portals floors --save
 gifts-sales markets portals filter-floors --gift-name "Toy Bear" --save
 
 # Sync attribute floors for local gifts from a scanned profile
-gifts-sales markets portals sync-floors --from-local --owner-peer @some_profile --limit 5
+gifts-sales markets portals sync-floors --from-local --owner-peer @some_profile --limit 1000
 
 # Rank local gifts by saved Portals attribute-floor signals
 gifts-sales markets portals portfolio-report --owner-peer @some_profile --limit 25
