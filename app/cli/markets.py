@@ -44,6 +44,17 @@ class PortfolioReportRow:
     action: str
 
 
+@dataclass(frozen=True)
+class ListingVerification:
+    gift_id: int | None
+    title: str
+    slug: str | None
+    match_type: str
+    exact_floor_ton: float | None
+    listing_count: int
+    listings: list[PortalsListing]
+
+
 @portals_app.command("auth")
 def portals_auth(
     write_env: bool = typer.Option(False, "--write-env", help="Persist PORTALS_AUTH_DATA to .env"),
@@ -289,6 +300,95 @@ async def _portals_portfolio_report(
     _render_portfolio_report(rows[:limit], owner_peer=owner_peer, total_matches=len(rows))
 
 
+@portals_app.command("verify-listings")
+def portals_verify_listings(
+    owner_peer: str = typer.Option("self", "--owner-peer", help="Local gift owner peer"),
+    limit: int = typer.Option(25, "--limit", help="Max local candidates to verify"),
+    per_query_limit: int = typer.Option(5, "--per-query-limit", help="Max listings per exact query"),
+    min_confidence: str = typer.Option("medium", "--min-confidence", help="low, medium, or high"),
+    save: bool = typer.Option(True, "--save/--no-save", help="Persist exact listing snapshots"),
+    sleep_seconds: float = typer.Option(0.75, "--sleep-seconds", help="Delay between Portals requests"),
+    max_attempts_per_gift: int = typer.Option(
+        4,
+        "--max-attempts-per-gift",
+        help="Max filter combinations to try for each local gift",
+    ),
+) -> None:
+    """Verify local candidates against exact Portals listings."""
+    asyncio.run(
+        _portals_verify_listings(
+            owner_peer,
+            limit,
+            per_query_limit,
+            min_confidence,
+            save,
+            sleep_seconds,
+            max_attempts_per_gift,
+        )
+    )
+
+
+async def _portals_verify_listings(
+    owner_peer: str,
+    limit: int,
+    per_query_limit: int,
+    min_confidence: str,
+    save: bool,
+    sleep_seconds: float,
+    max_attempts_per_gift: int,
+) -> None:
+    settings = get_settings()
+    settings.ensure_data_dir()
+    configure_logging(settings.log_level, settings.log_format)
+    await init_db(settings.db_url)
+
+    sf = get_session_factory()
+    async with sf() as session:
+        gifts = await GiftRepository(session).list_all(owner_peer=owner_peer)
+        floors = await MarketRepository(session).latest_floors(market="portals", limit=100_000)
+
+    rows = _build_portfolio_report_rows(
+        gifts,
+        _latest_collection_floor_index(floors),
+        _latest_floor_index(floors),
+    )
+    allowed_confidences = _confidence_filter(min_confidence)
+    candidates = [row for row in rows if row.confidence in allowed_confidences]
+    candidates.sort(key=lambda row: (row.best_floor_ton is not None, row.best_floor_ton or 0), reverse=True)
+    candidates = candidates[:limit]
+
+    client = PortalsClient(settings.portals_api_base, settings.portals_auth_data)
+    verifications: list[ListingVerification] = []
+    failed: list[tuple[PortfolioReportRow, str]] = []
+    try:
+        for index, row in enumerate(candidates):
+            try:
+                verification = await _verify_portals_listing(
+                    client,
+                    row,
+                    per_query_limit,
+                    sleep_seconds=sleep_seconds,
+                    max_attempts=max_attempts_per_gift,
+                )
+            except PortalsApiError as exc:
+                failed.append((row, str(exc)))
+                if "429" in str(exc):
+                    break
+                continue
+            if verification is not None:
+                verifications.append(verification)
+            if sleep_seconds > 0 and index < len(candidates) - 1:
+                await asyncio.sleep(sleep_seconds)
+    except PortalsAuthError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1)
+
+    if save and verifications:
+        await _save_listing_verifications(settings.db_url, verifications)
+
+    _render_listing_verifications(verifications, failed, requested=len(candidates))
+
+
 async def _save_floors(db_url: str, floors: list[PortalsFloor]) -> None:
     await init_db(db_url)
     sf = get_session_factory()
@@ -296,6 +396,20 @@ async def _save_floors(db_url: str, floors: list[PortalsFloor]) -> None:
         repo = MarketRepository(session)
         for floor in floors:
             await repo.add_floor(_floor_schema(floor))
+        await session.commit()
+
+
+async def _save_listing_verifications(
+    db_url: str,
+    verifications: list[ListingVerification],
+) -> None:
+    await init_db(db_url)
+    sf = get_session_factory()
+    async with sf() as session:
+        repo = MarketRepository(session)
+        for verification in verifications:
+            for listing in verification.listings:
+                await repo.add_listing(_verification_listing_schema(verification, listing))
         await session.commit()
 
 
@@ -317,6 +431,40 @@ def _render_listings(listings: list[PortalsListing]) -> None:
             f"{listing.price_ton:.4f}" if listing.price_ton is not None else "-",
         )
     console.print(table)
+
+
+def _render_listing_verifications(
+    verifications: list[ListingVerification],
+    failed: list[tuple[PortfolioReportRow, str]],
+    *,
+    requested: int,
+) -> None:
+    table = Table(title=f"Portals Exact Listing Verification ({len(verifications)}/{requested})")
+    table.add_column("Gift ID", style="dim")
+    table.add_column("Gift")
+    table.add_column("Slug", style="dim")
+    table.add_column("Match")
+    table.add_column("Listings")
+    table.add_column("Exact Floor TON", style="yellow")
+    for verification in verifications:
+        table.add_row(
+            str(verification.gift_id or "-"),
+            verification.title,
+            verification.slug or "-",
+            verification.match_type,
+            str(verification.listing_count),
+            _format_ton(verification.exact_floor_ton),
+        )
+    console.print(table)
+
+    if failed:
+        failed_table = Table(title="Portals Exact Verification Failures")
+        failed_table.add_column("Gift ID", style="dim")
+        failed_table.add_column("Gift")
+        failed_table.add_column("Error")
+        for row, error in failed[:20]:
+            failed_table.add_row(str(row.gift_id or "-"), row.title, error[:160])
+        console.print(failed_table)
 
 
 def _render_floors(floors: list[PortalsFloor]) -> None:
@@ -415,6 +563,31 @@ def _listing_schema(listing: PortalsListing) -> MarketListingCreateSchema:
         symbol=listing.symbol,
         price_ton=listing.price_ton,
         raw_json=json.dumps(listing.raw, ensure_ascii=False),
+    )
+
+
+def _verification_listing_schema(
+    verification: ListingVerification,
+    listing: PortalsListing,
+) -> MarketListingCreateSchema:
+    raw = {
+        **listing.raw,
+        "_verification": {
+            "local_gift_id": verification.gift_id,
+            "local_slug": verification.slug,
+            "match_type": verification.match_type,
+        },
+    }
+    return MarketListingCreateSchema(
+        market="portals",
+        external_id=listing.external_id,
+        tg_id=listing.tg_id,
+        gift_name=listing.gift_name,
+        model=listing.model,
+        backdrop=listing.backdrop,
+        symbol=listing.symbol,
+        price_ton=listing.price_ton,
+        raw_json=json.dumps(raw, ensure_ascii=False),
     )
 
 
@@ -643,6 +816,94 @@ def _portfolio_row_dict(row: PortfolioReportRow) -> dict[str, Any]:
         "confidence": row.confidence,
         "action": row.action,
     }
+
+
+def _confidence_filter(min_confidence: str) -> set[str]:
+    levels = ["low", "medium", "high"]
+    normalized = min_confidence.lower()
+    if normalized not in levels:
+        raise typer.BadParameter("min-confidence must be one of: low, medium, high")
+    return set(levels[levels.index(normalized):])
+
+
+def _listing_search_attempts(row: PortfolioReportRow) -> list[dict[str, str | None]]:
+    values = {
+        "model": row.model,
+        "symbol": row.symbol,
+        "backdrop": row.backdrop,
+    }
+    attempts: list[tuple[str, tuple[str, ...]]] = [
+        ("model+symbol+backdrop", ("model", "symbol", "backdrop")),
+        ("model+symbol", ("model", "symbol")),
+        ("model+backdrop", ("model", "backdrop")),
+        ("symbol+backdrop", ("symbol", "backdrop")),
+        ("model", ("model",)),
+        ("symbol", ("symbol",)),
+        ("backdrop", ("backdrop",)),
+        ("collection", ()),
+    ]
+    result: list[dict[str, str | None]] = []
+    for match_type, keys in attempts:
+        if any(not values[key] for key in keys):
+            continue
+        result.append(
+            {
+                "match_type": match_type,
+                "model": values["model"] if "model" in keys else None,
+                "symbol": values["symbol"] if "symbol" in keys else None,
+                "backdrop": values["backdrop"] if "backdrop" in keys else None,
+            }
+        )
+    return result
+
+
+async def _verify_portals_listing(
+    client: PortalsClient,
+    row: PortfolioReportRow,
+    per_query_limit: int,
+    *,
+    sleep_seconds: float = 0,
+    max_attempts: int | None = None,
+) -> ListingVerification | None:
+    attempted_results: list[tuple[str, list[PortalsListing]]] = []
+    attempts = _listing_search_attempts(row)
+    if max_attempts is not None:
+        attempts = attempts[:max_attempts]
+    for index, attempt in enumerate(attempts):
+        listings = client.search(
+            gift_name=row.title,
+            model=attempt["model"],
+            backdrop=attempt["backdrop"],
+            symbol=attempt["symbol"],
+            sort="price_asc",
+            limit=per_query_limit,
+        )
+        attempted_results.append((str(attempt["match_type"]), listings))
+        if listings:
+            break
+        if sleep_seconds > 0 and index < len(attempts) - 1:
+            await asyncio.sleep(sleep_seconds)
+    return _best_listing_verification(row, attempted_results)
+
+
+def _best_listing_verification(
+    row: PortfolioReportRow,
+    attempted_results: list[tuple[str, list[PortalsListing]]],
+) -> ListingVerification | None:
+    for match_type, listings in attempted_results:
+        if not listings:
+            continue
+        prices = [listing.price_ton for listing in listings if listing.price_ton is not None]
+        return ListingVerification(
+            gift_id=row.gift_id,
+            title=row.title,
+            slug=row.slug,
+            match_type=match_type,
+            exact_floor_ton=min(prices) if prices else None,
+            listing_count=len(listings),
+            listings=listings,
+        )
+    return None
 
 
 def _best_floor_match(

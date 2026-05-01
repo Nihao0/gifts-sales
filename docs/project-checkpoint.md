@@ -265,17 +265,39 @@ Concrete example to remember:
 This returned one exact Portals listing at `60000 TON`, while the filter hint for
 the same backdrop was `19.99`. Exact listing search wins for sale decisions.
 
+First exact listing verification command implemented:
+
+```bash
+.venv/bin/gifts-sales markets portals verify-listings \
+  --owner-peer @segamegahigh \
+  --limit 10 \
+  --per-query-limit 5 \
+  --min-confidence high \
+  --sleep-seconds 2 \
+  --max-attempts-per-gift 4 \
+  --save
+```
+
+Use small batches because Portals can return `429 too many requests`.
+Live smoke test:
+
+- Command with `--limit 1 --max-attempts-per-gift 8 --sleep-seconds 2` verified
+  local gift `53` (`Durov’s Cap`, `DurovsCap-2758`).
+- Best exact match found: `model`.
+- Exact Portals listing floor saved: `1777 TON`.
+- Snapshot was stored in `market_listings.raw_json` with `_verification`
+  metadata: local gift id, local slug, match type.
+
 ## Next Implementation Plan
 
 High priority:
 
 1. Add exact Portals listing verification for all profile collections and sale
    candidates:
-   - do not limit exact checks to `Durov’s Cap`;
-   - iterate through every collection represented in the scanned profile;
-   - for each candidate gift, query exact Portals listings with `collection_ids`
-     plus available model/backdrop/symbol filters;
-   - store exact listing snapshots separately from filter hints;
+   - initial command exists as `markets portals verify-listings`;
+   - next improvement: run it in resumable batches across all candidates;
+   - next improvement: surface saved exact listing floor directly in
+     `portfolio-report`;
    - prefer exact listing floor over `collections/filters` hints for any sale
      decision;
    - record whether the exact match was collection-only, model-only,

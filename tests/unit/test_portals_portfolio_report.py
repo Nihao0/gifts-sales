@@ -4,11 +4,14 @@ from datetime import datetime, timezone
 from app.cli.markets import (
     _best_floor_match,
     _build_portfolio_report_rows,
+    _listing_search_attempts,
+    _best_listing_verification,
     _gift_attributes,
     _latest_collection_floor_index,
     _latest_floor_index,
     _portfolio_row_dict,
 )
+from app.markets.portals import PortalsListing
 from app.models.gift import Gift
 from app.models.market import MarketFloor
 
@@ -221,3 +224,88 @@ def test_portfolio_row_dict_is_export_friendly():
     assert data["gift_id"] == 8
     assert data["title"] == "Fresh Socks"
     assert data["best_signal"] == "none"
+
+
+def test_listing_search_attempts_start_with_exact_attribute_match():
+    row = _build_portfolio_report_rows(
+        [
+            Gift(
+                id=7,
+                telegram_gift_id="7",
+                owner_peer="@visible",
+                title="Desk Calendar",
+                slug="DeskCalendar-273465",
+                raw_json=json.dumps(
+                    {
+                        "gift": {
+                            "attributes": [
+                                {"_": "StarGiftAttributeModel", "name": "Crunch Time"},
+                                {"_": "StarGiftAttributePattern", "name": "Royal Crown"},
+                                {"_": "StarGiftAttributeBackdrop", "name": "Pistachio"},
+                            ]
+                        }
+                    }
+                ),
+            )
+        ],
+        {},
+        {},
+        include_unmatched=True,
+    )[0]
+
+    attempts = _listing_search_attempts(row)
+
+    assert attempts[0] == {
+        "match_type": "model+symbol+backdrop",
+        "model": "Crunch Time",
+        "symbol": "Royal Crown",
+        "backdrop": "Pistachio",
+    }
+    assert attempts[-1] == {
+        "match_type": "collection",
+        "model": None,
+        "symbol": None,
+        "backdrop": None,
+    }
+
+
+def test_best_listing_verification_uses_first_attempt_with_results():
+    row = _build_portfolio_report_rows(
+        [
+            Gift(
+                id=7,
+                telegram_gift_id="7",
+                owner_peer="@visible",
+                title="Desk Calendar",
+                slug="DeskCalendar-273465",
+                raw_json=json.dumps({"gift": {"attributes": []}}),
+            )
+        ],
+        {},
+        {},
+        include_unmatched=True,
+    )[0]
+    listing = PortalsListing(
+        external_id="abc",
+        tg_id="123",
+        gift_name="Desk Calendar",
+        model=None,
+        backdrop=None,
+        symbol=None,
+        price_ton=44.0,
+        raw={"id": "abc"},
+    )
+
+    verification = _best_listing_verification(
+        row,
+        [
+            ("model+symbol+backdrop", []),
+            ("collection", [listing]),
+        ],
+    )
+
+    assert verification is not None
+    assert verification.gift_id == 7
+    assert verification.match_type == "collection"
+    assert verification.exact_floor_ton == 44.0
+    assert verification.listing_count == 1

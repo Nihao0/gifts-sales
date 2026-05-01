@@ -277,7 +277,20 @@ Next needed command:
   --owner-peer @segamegahigh
 ```
 
-This command does not exist yet. It should:
+The first implementation now exists under the Portals command group:
+
+```bash
+.venv/bin/gifts-sales markets portals verify-listings \
+  --owner-peer @segamegahigh \
+  --limit 10 \
+  --per-query-limit 5 \
+  --min-confidence high \
+  --sleep-seconds 2 \
+  --max-attempts-per-gift 4 \
+  --save
+```
+
+It:
 
 - iterate through sale candidates or all local collections;
 - run exact Portals search using collection id + available attributes;
@@ -288,6 +301,12 @@ This command does not exist yet. It should:
   - symbol only;
   - backdrop only;
   - model + symbol + backdrop.
+
+Operational note:
+
+- Portals can return `429 too many requests`.
+- Use small `--limit` batches and non-zero `--sleep-seconds`.
+- If `429` appears, wait before continuing.
 
 ## Portals Transfer
 

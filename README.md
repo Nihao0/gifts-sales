@@ -124,6 +124,13 @@ gifts-sales markets portals sync-floors --from-local --owner-peer @some_profile 
 # Rank local gifts by saved Portals attribute-floor signals
 gifts-sales markets portals portfolio-report --owner-peer @some_profile --limit 25
 
+# Verify exact Portals listings for top local candidates, saving snapshots
+gifts-sales markets portals verify-listings \
+  --owner-peer @some_profile \
+  --limit 10 \
+  --min-confidence high \
+  --sleep-seconds 2
+
 # Export every local gift, including gifts without saved Portals market data
 gifts-sales markets portals portfolio-report \
   --owner-peer @some_profile \
