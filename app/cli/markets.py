@@ -374,8 +374,8 @@ def _render_portfolio_report(
     table.add_column("ID", style="dim", no_wrap=True)
     table.add_column("Gift")
     table.add_column("Attributes")
-    table.add_column("Floors TON\nC / M / S / B", style="yellow")
-    table.add_column("Best", no_wrap=True)
+    table.add_column("Filter Hints TON\nC / M / S / B", style="yellow")
+    table.add_column("Best Hint", no_wrap=True)
     table.add_column("Conf", no_wrap=True)
     table.add_column("Next")
     for row in rows:

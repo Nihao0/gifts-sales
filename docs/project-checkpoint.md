@@ -124,6 +124,13 @@ Portals checks:
   - `424` medium-confidence rows;
   - `19` low-confidence rows;
   - `661` unknown rows, mostly gifts without Telegram title metadata.
+- Important correction: Portals `collections/filters` values are attribute
+  filter hints, not guaranteed exact sale/listing floors. Example:
+  `Durov’s Cap / Black` appeared as `19.99` in filters, but exact listing search
+  with `collection_ids` returned the real listed floor of `60000 TON`.
+- `nfts/search` must use Portals collection ids (`collection_ids=...`), not the
+  older `filter_by_collections` parameter. The client now resolves collection ids
+  via `/collections` before exact listing search.
 
 Verification:
 
@@ -214,10 +221,10 @@ Run checks:
 
 `portfolio-report` is only a research signal.
 
-It now shows collection/model/symbol/backdrop floors separately and then marks
-the strongest saved signal. A high symbol floor can indicate value, but it is
-not the same as an exact price for the full combination of model + backdrop +
-symbol.
+It now shows collection/model/symbol/backdrop filter hints separately and then
+marks the strongest saved hint. A high symbol/model/backdrop hint can indicate
+value, but it is not the same as an exact listed price for the full combination
+of model + backdrop + symbol.
 
 Before listing, the pricing engine should combine:
 
@@ -230,6 +237,19 @@ Before listing, the pricing engine should combine:
 - current Telegram internal marketplace resale options where available;
 - user-configured minimum acceptable price;
 - approval status.
+
+Concrete example to remember:
+
+```bash
+.venv/bin/gifts-sales markets portals search \
+  --gift-name "Durov’s Cap" \
+  --backdrop Black \
+  --sort price_asc \
+  --limit 5
+```
+
+This returned one exact Portals listing at `60000 TON`, while the filter hint for
+the same backdrop was `19.99`. Exact listing search wins for sale decisions.
 
 ## Next Implementation Plan
 

@@ -131,6 +131,8 @@ Portals floor signals are research data, not automatic listing prices. The
 attribute report shows collection/model/symbol/backdrop floors separately,
 marks the strongest signal, and gives a conservative next action. Telegram
 internal market prices still need to be checked before final sale decisions.
+For exact Portals listing checks, use `markets portals search`; it resolves the
+collection id before querying listings.
 
 ### Show details for a specific gift
 

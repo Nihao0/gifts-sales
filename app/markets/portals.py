@@ -59,6 +59,7 @@ class PortalsClient:
     def __init__(self, base_url: str, auth_data: str | None) -> None:
         self._base_url = base_url.rstrip("/") + "/"
         self._auth_data = auth_data
+        self._collection_ids_by_short_name: dict[str, str] | None = None
 
     def search(
         self,
@@ -84,7 +85,11 @@ class PortalsClient:
         if max_price < 100000:
             params.extend([f"min_price={min_price}", f"max_price={max_price}"])
         if gift_name:
-            params.append(f"filter_by_collections={quote_plus(_cap(gift_name))}")
+            collection_id = self.collection_id(gift_name)
+            if collection_id:
+                params.append(f"collection_ids={quote_plus(collection_id)}")
+            else:
+                params.append(f"filter_by_collections={quote_plus(_cap(gift_name))}")
         if model:
             params.append(f"filter_by_models={quote_plus(_cap(model))}")
         if backdrop:
@@ -99,6 +104,28 @@ class PortalsClient:
         if not isinstance(raw_results, list):
             raw_results = [raw_results]
         return [_parse_listing(item) for item in raw_results if isinstance(item, dict)]
+
+    def collection_id(self, gift_name: str) -> str | None:
+        short_name = _short_name(gift_name)
+        if self._collection_ids_by_short_name is None:
+            self._collection_ids_by_short_name = self._load_collection_ids()
+        return self._collection_ids_by_short_name.get(short_name)
+
+    def _load_collection_ids(self) -> dict[str, str]:
+        payload = self._get("collections?offset=0&limit=500")
+        raw_collections = payload.get("collections", payload) if isinstance(payload, dict) else payload
+        if not isinstance(raw_collections, list):
+            return {}
+
+        result: dict[str, str] = {}
+        for item in raw_collections:
+            if not isinstance(item, dict):
+                continue
+            collection_id = _string_or_none(item.get("id"))
+            short_name = _string_or_none(item.get("short_name") or item.get("name"))
+            if collection_id and short_name:
+                result[_short_name(short_name)] = collection_id
+        return result
 
     def collection_floors(self) -> list[PortalsFloor]:
         payload = self._get("collections/floors")

@@ -40,6 +40,33 @@ def test_portals_search_parses_results():
     assert listings[0].price_ton == 12.5
 
 
+def test_portals_search_uses_collection_id_when_available():
+    client = PortalsClient("https://portals-market.com/api", "tma test")
+    calls: list[str] = []
+
+    def fake_get(path: str):
+        calls.append(path)
+        if path.startswith("collections?"):
+            return {
+                "collections": [
+                    {
+                        "id": "fc46d19d-5f25-44c5-8924-5976c2fb790e",
+                        "name": "Durov’s Cap",
+                        "short_name": "durovscap",
+                    }
+                ]
+            }
+        return {"results": []}
+
+    with patch.object(client, "_get", side_effect=fake_get):
+        client.search(gift_name="Durov’s Cap", backdrop="Black")
+
+    search_path = calls[-1]
+    assert "collection_ids=fc46d19d-5f25-44c5-8924-5976c2fb790e" in search_path
+    assert "filter_by_collections" not in search_path
+    assert "filter_by_backdrops=Black" in search_path
+
+
 def test_portals_filter_floors_parses_attribute_floors():
     client = PortalsClient("https://portals-market.com/api", "tma test")
 
