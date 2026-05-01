@@ -1,0 +1,278 @@
+# Project Checkpoint
+
+Last updated: 2026-05-01
+
+This file is the short re-entry point for the project. Read it first in a new
+session before opening the longer notes in `docs/work-context.md`.
+
+## Project Goal
+
+Build a Telegram collectible-gifts sales assistant.
+
+Target flow:
+
+1. Scan gifts visible in a Telegram profile.
+2. Determine which gift collections and concrete attributes actually exist in
+   that profile.
+3. Fetch market data only for those relevant gifts:
+   - Portals floors and listings;
+   - Telegram internal marketplace prices;
+   - later GetGems/on-chain data.
+4. Rank possible sale candidates.
+5. Ask the user for approval.
+6. Send/list/sell through the right market executor.
+7. Eventually expose this through a user-friendly Telegram bot or small web UI.
+
+## Current Repository
+
+- Local path: `/Users/sega/gifts sales`
+- GitHub: `https://github.com/Nihao0/gifts-sales`
+- Branch: `main`
+- Latest pushed checkpoint before this note: `1d1f232`
+- Runtime: Python 3.12, Typer CLI, Telethon, SQLAlchemy async, SQLite.
+- Local DB: `data/gifts.db`
+- Telegram session: `data/session`
+
+Secrets are intentionally not documented here. They live in local `.env`, which
+is ignored by git.
+
+## What Already Works
+
+Telegram/account:
+
+- Telegram login via Telethon works.
+- Current local session successfully connected and scanned profiles.
+- The session can request Portals Mini App auth data and save it to `.env`.
+
+Gift inventory:
+
+- `gifts-sales gifts scan` scans the logged-in account.
+- `gifts-sales gifts scan --peer @some_profile` scans visible gifts from another
+  profile using the logged-in session.
+- `gifts-sales gifts list-local --owner-peer @some_profile` filters stored gifts
+  by profile owner.
+- `gifts-sales gifts export --owner-peer @some_profile ...` exports profile data.
+
+Portals research:
+
+- `gifts-sales markets portals auth --write-env` fetches Mini App auth.
+- `gifts-sales markets portals floors --save` fetches collection floors.
+- `gifts-sales markets portals filter-floors --gift-name "Toy Bear" --save`
+  fetches model/backdrop/symbol floors for a collection.
+- `gifts-sales markets portals sync-floors --from-local --owner-peer @profile`
+  fetches floors only for collection titles that already exist locally.
+- `gifts-sales markets portals portfolio-report --owner-peer @profile` ranks
+  local gifts by the best saved matching Portals attribute-floor signal.
+
+Write operations:
+
+- Telegram internal list/delist exists.
+- Transfer to a configured Portals recipient exists for free transfer flows.
+- Paid checkout flows are intentionally not automated yet.
+- Approval request infrastructure exists and should remain the gate for
+  risky/paid/write actions.
+
+## Live Test Results
+
+Target profile used for collection:
+
+- `@segamegahigh`
+
+Scan result:
+
+- Command: `gifts-sales gifts scan --peer @segamegahigh`
+- Result: `2686` visible gifts fetched and stored.
+- After cleanup, local DB contains `2686` distinct rows for
+  `owner_peer='@segamegahigh'`.
+- `2027` rows have collection titles.
+- `2025` rows have slugs.
+
+Important bug found and fixed:
+
+- Visible-profile gifts can arrive without `saved_id` and `msg_id`.
+- Old logic used `@segamegahigh:0`, causing thousands of gifts to collapse into
+  one DB row.
+- Fixed fallback identity:
+  `owner_peer:visible:{index}:{gift_id}:{date}`.
+
+Portals live API behavior:
+
+- Working base URL: `https://portal-market.com/api`
+- Current `collections/filters` response shape:
+  `collections -> <short_name> -> models/backdrops/symbols`.
+- Parser supports both this live shape and older `floor_prices`/`floorPrices`
+  shapes.
+
+Portals checks:
+
+- `filter-floors --gift-name "Toy Bear"` returned `394` attribute floors.
+- `sync-floors --from-local --owner-peer @segamegahigh --limit 5` saved `1799`
+  floor rows.
+- `portfolio-report --owner-peer @segamegahigh --limit 15` found `208` matched
+  local gifts using the saved floor data.
+
+Verification:
+
+- `ruff check app tests` passes.
+- `pytest -q` passes with `69 passed`.
+
+## Important Product Decision
+
+The correct market-research strategy is profile-first, not market-first.
+
+Do not scrape every market broadly as the default workflow. First scan the
+profile and build the list of actual collections and attributes present. Then
+fetch only the market data needed for those gifts.
+
+Recommended pipeline:
+
+1. Scan profile.
+2. Extract unique gift collections.
+3. Extract exact attributes from Telegram raw JSON:
+   - model from `StarGiftAttributeModel`;
+   - backdrop from `StarGiftAttributeBackdrop`;
+   - symbol/pattern from `StarGiftAttributePattern`.
+4. Fetch Portals data for only those collections.
+5. Fetch Telegram internal market data for only those collections or collectible
+   IDs where the API supports it.
+6. Match each local gift to:
+   - collection floor;
+   - model floor;
+   - symbol floor;
+   - backdrop floor;
+   - exact listing prices if available.
+7. Produce a candidate list with confidence and reason.
+8. Require user approval before transfer/listing/sale.
+
+## Current Commands To Resume Work
+
+Scan profile:
+
+```bash
+.venv/bin/gifts-sales gifts scan --peer @segamegahigh
+```
+
+Sync a small Portals sample:
+
+```bash
+.venv/bin/gifts-sales markets portals sync-floors \
+  --from-local \
+  --owner-peer @segamegahigh \
+  --limit 5
+```
+
+Show ranked report:
+
+```bash
+.venv/bin/gifts-sales markets portals portfolio-report \
+  --owner-peer @segamegahigh \
+  --limit 25
+```
+
+Run checks:
+
+```bash
+.venv/bin/ruff check app tests
+.venv/bin/pytest -q
+```
+
+## Current Limitation Of The Report
+
+`portfolio-report` is only a research signal.
+
+It ranks by the highest matching Portals attribute floor among model, backdrop,
+and symbol. A high symbol floor can indicate value, but it is not the same as an
+exact price for the full combination of model + backdrop + symbol.
+
+Before listing, the pricing engine should combine:
+
+- exact Portals listings for the same gift if available;
+- collection floor;
+- model floor;
+- symbol floor;
+- backdrop floor;
+- rarity/supply from raw Portals data;
+- current Telegram internal marketplace resale options where available;
+- user-configured minimum acceptable price;
+- approval status.
+
+## Next Implementation Plan
+
+High priority:
+
+1. Add a dedicated `research` command group or service layer so the workflow is
+   explicit:
+   - `research scan-profile --peer @segamegahigh`;
+   - `research sync-portals --owner-peer @segamegahigh`;
+   - `research sync-telegram-market --owner-peer @segamegahigh`;
+   - `research report --owner-peer @segamegahigh`.
+
+2. Improve Portals sync so it defaults to relevant local profile gifts:
+   - avoid broad market scans;
+   - dedupe collection names;
+   - store one latest snapshot per collection/attribute where possible;
+   - make terminal output compact by default.
+
+3. Add a pricing/candidate table or view:
+   - local gift id;
+   - owner peer;
+   - title;
+   - slug;
+   - model/backdrop/symbol;
+   - best floor signal;
+   - signal type;
+   - confidence;
+   - suggested listing price;
+   - reason.
+
+4. Add Telegram internal marketplace research:
+   - inspect which MTProto methods can return resale/listing options for the
+     exact local gifts;
+   - handle current `INPUT_METHOD_INVALID...` error gracefully;
+   - persist useful internal-market snapshots.
+
+5. Add approval-first sell workflow:
+   - plan candidates;
+   - create approval requests;
+   - user approves manually;
+   - executor transfers/lists only approved items.
+
+Medium priority:
+
+6. Build a user layer:
+   - Telegram bot is likely the fastest first UI;
+   - commands/buttons: refresh profile, refresh market data, show top, approve,
+     reject, send to Portals, list on Telegram;
+   - later a small web dashboard can be added for dense portfolio tables.
+
+7. Add exact Portals listing search for selected candidates:
+   - use collection + model + backdrop + symbol where endpoint supports it;
+   - store listings separately from floors;
+   - compare exact listing floor against attribute-only floor.
+
+8. Add safety policies:
+   - max number of actions per run;
+   - min price;
+   - never buy automatically;
+   - never use paid transfer checkout without explicit approval;
+   - keep write operations behind a single queue.
+
+Later:
+
+9. Research GetGems/on-chain:
+   - wallet NFT discovery;
+   - GetGems API/indexer behavior;
+   - fixed-price sale contract flow;
+   - TonConnect/manual signing;
+   - isolated low-balance agent wallet only after approvals are proven.
+
+## Safety Notes
+
+- Portals API appears private/unstable, so keep connector defensive and
+  read-only until the behavior is stable.
+- Do not log or commit `.env`, Telegram session files, API hash, phone, or
+  Portals auth data.
+- Gifts scanned from another profile are for analysis. The logged-in account
+  cannot sell or transfer gifts owned by another account unless those gifts are
+  actually moved to it.
+- Paid operations must stay approval-gated.

@@ -18,6 +18,12 @@ Production-minded MVP Telegram userbot for listing collectible gifts on Telegram
 - **Structured logging** (JSON or console)
 - **CLI** powered by Typer
 
+## Current checkpoint
+
+Start future sessions with [`docs/project-checkpoint.md`](docs/project-checkpoint.md).
+It summarizes the live `@segamegahigh` scan, Portals floor research, current
+limits, and the next implementation plan.
+
 ## Requirements
 
 - Python 3.12+
