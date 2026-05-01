@@ -5,6 +5,12 @@ Last updated: 2026-05-01
 This file is the short re-entry point for the project. Read it first in a new
 session before opening the longer notes in `docs/work-context.md`.
 
+Related focused notes:
+
+- `docs/sales-workflow-notes.md` — current thinking on Telegram market listing,
+  Portals transfer, bulk execution, approvals, and why execution workflow is now
+  higher priority than broad price scraping.
+
 ## Project Goal
 
 Build a Telegram collectible-gifts sales assistant.
@@ -71,6 +77,11 @@ Write operations:
 
 - Telegram internal list/delist exists.
 - Transfer to a configured Portals recipient exists for free transfer flows.
+- Bulk Telegram listing exists through YAML rules, but it is not yet connected
+  to the improved sale-candidate research report.
+- Portals transfer planning exists through policies/approvals, but full
+  transfer -> Portals appearance -> Portals listing has not been proven end to
+  end yet.
 - Paid checkout flows are intentionally not automated yet.
 - Approval request infrastructure exists and should remain the gate for
   risky/paid/write actions.
@@ -324,6 +335,13 @@ High priority:
 Keep the sale path in mind while improving research: every report row should
 eventually be convertible into a sale candidate with exact listing verification,
 suggested price, market destination, and approval status.
+
+8. Build bulk execution commands around sale candidates:
+   - bulk Telegram listing for gifts owned by `self`;
+   - bulk Portals transfer for approved gifts;
+   - dry-run first;
+   - approval requests before real writes;
+   - post-action state checks.
 
 Medium priority:
 
